@@ -1,118 +1,83 @@
 version: "3.8"
+
 services:
-  db-yoltash:
-    container_name: db-yoltash
+  db:
     image: supabase/postgres:15.1.1.78
-    healthcheck:
-      test: pg_isready -U postgres -h localhost
-      interval: 5s
-      timeout: 5s
-      retries: 10
-    restart: unless-stopped
-    expose:
-      - ${POSTGRES_PORT}
+    container_name: yoltash-db-1
     environment:
       POSTGRES_HOST: /var/run/postgresql
-      PGPORT: ${POSTGRES_PORT}
-      POSTGRES_PORT: ${POSTGRES_PORT}
-      PGPASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      PGDATABASE: ${POSTGRES_DB}
-      POSTGRES_DB: ${POSTGRES_DB}
-      JWT_SECRET: ${JWT_SECRET}
-      JWT_EXP: ${JWT_EXPIRY}
+      POSTGRES_PORT: 5432
+      POSTGRES_PASSWORD: sfJm7QpwQXE5dKu83vGTGk6W42vLhBAy
+      POSTGRES_DB: postgres
+      JWT_SECRET: cuGsoO1T2JRSZrU9lP7FeAPQnI6t4aYiELGHt8t1nXI=
+      JWT_EXP: 3600
     volumes:
-      - ./volumes/db/data:/var/lib/postgresql/data:Z
+      - db-data:/var/lib/postgresql/data
     networks:
       - yoltash-network
-
-  vector-yoltash:
-    container_name: vector-yoltash
-    image: timberio/vector:0.28.1-alpine
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://vector-yoltash:9001/health"]
-      timeout: 5s
+      test: ["CMD", "pg_isready", "-U", "postgres"]
       interval: 5s
-      retries: 3
-    volumes:
-      - ./volumes/logs/vector.yml:/etc/vector/vector.yml:ro
-      - ${DOCKER_SOCKET_LOCATION}:/var/run/docker.sock:ro
-    environment:
-      LOGFLARE_API_KEY: ${LOGFLARE_API_KEY}
-    command: ["--config", "etc/vector/vector.yml"]
-    networks:
-      - yoltash-network
-
-  analytics-yoltash:
-    container_name: analytics-yoltash
-    image: supabase/logflare:1.4.0
-    healthcheck:
-      test: ["CMD", "curl", "http://localhost:4000/health"]
       timeout: 5s
-      interval: 5s
       retries: 10
-    restart: unless-stopped
-    depends_on:
-      db-yoltash:
-        condition: service_healthy
+
+  analytics:
+    image: supabase/logflare:1.4.0
+    container_name: yoltash-analytics-1
     environment:
-      LOGFLARE_NODE_HOST: 127.0.0.1
       DB_USERNAME: supabase_admin
-      DB_DATABASE: ${POSTGRES_DB}
-      DB_HOSTNAME: db-yoltash
-      DB_PORT: ${POSTGRES_PORT}
-      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_DATABASE: postgres
+      DB_HOSTNAME: db
+      DB_PORT: 5432
+      DB_PASSWORD: sfJm7QpwQXE5dKu83vGTGk6W42vLhBAy
       DB_SCHEMA: _analytics
-      LOGFLARE_API_KEY: ${LOGFLARE_API_KEY}
+      LOGFLARE_API_KEY: Z1QGhd6u89xPVcEjWv0nrXkgY2f4szDo
       LOGFLARE_SINGLE_TENANT: true
       LOGFLARE_SUPABASE_MODE: true
       LOGFLARE_MIN_CLUSTER_SIZE: 1
-      POSTGRES_BACKEND_URL: postgresql://supabase_admin:${POSTGRES_PASSWORD}@db-yoltash:${POSTGRES_PORT}/${POSTGRES_DB}
+      POSTGRES_BACKEND_URL: postgresql://supabase_admin:sfJm7QpwQXE5dKu83vGTGk6W42vLhBAy@db:5432/postgres
       POSTGRES_BACKEND_SCHEMA: _analytics
       LOGFLARE_FEATURE_FLAG_OVERRIDE: multibackend=true
-    expose:
-      - 4000
-    networks:
-      - yoltash-network
-
-  studio-yoltash:
-    container_name: studio-yoltash
-    image: supabase/studio:20240729-ce42139
-    restart: unless-stopped
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "node",
-          "-e",
-          "require('http').get('http://localhost:3000/api/profile', (r) => {if (r.statusCode !== 200) throw new Error(r.statusCode)})",
-        ]
-      timeout: 5s
-      interval: 5s
-      retries: 3
+      LOGFLARE_NODE_HOST: 127.0.0.1
     depends_on:
-      analytics-yoltash:
+      db:
         condition: service_healthy
-    environment:
-      STUDIO_PG_META_URL: http://meta-yoltash:8080
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      DEFAULT_ORGANIZATION_NAME: ${STUDIO_DEFAULT_ORGANIZATION}
-      DEFAULT_PROJECT_NAME: ${STUDIO_DEFAULT_PROJECT}
-      SUPABASE_URL: http://kong-yoltash:8000
-      SUPABASE_PUBLIC_URL: http://${SUPABASE_HOST}
-      SUPABASE_ANON_KEY: ${ANON_KEY}
-      SUPABASE_SERVICE_KEY: ${SERVICE_ROLE_KEY}
-      AUTH_JWT_SECRET: ${JWT_SECRET}
-      LOGFLARE_API_KEY: ${LOGFLARE_API_KEY}
-      LOGFLARE_URL: http://analytics-yoltash:4000
-      NEXT_PUBLIC_ENABLE_LOGS: true
-      NEXT_ANALYTICS_BACKEND_PROVIDER: postgres
+    expose:
+      - "4000"
+    healthcheck:
+      test: ["CMD", "curl", "http://localhost:4000/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
     networks:
       - yoltash-network
 
-  kong-yoltash:
-    container_name: kong-yoltash
+  studio:
+    image: supabase/studio:20240729-ce42139
+    container_name: yoltash-studio-1
+    environment:
+      STUDIO_PG_META_URL: http://meta:8080
+      POSTGRES_PASSWORD: sfJm7QpwQXE5dKu83vGTGk6W42vLhBAy
+      DEFAULT_ORGANIZATION_NAME: Yoltash Organization
+      DEFAULT_PROJECT_NAME: Yoltash Project
+      SUPABASE_URL: http://kong:8000
+      SUPABASE_PUBLIC_URL: http://yoltash-1.yasg-ai.ru
+      SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InlvbHRhc2giLCJpYXQiOjE3NTAwMDAwMDAsImV4cCI6MTkwMDAwMDAwMH0.qcP7Ij_RChNfoKz2uD8E3PfqvcmUq9sT8x7Esv8lzGM
+      SUPABASE_SERVICE_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIiwiaXNzIjoieW9sdGFzaCIsImlhdCI6MTc1MDAwMDAwMCwiZXhwIjoxOTAwMDAwMDAwfQ.DK2dqushvB-hRP5ErGe9wEtUPNNQnB4OLCJ9Jd9G4a0
+      AUTH_JWT_SECRET: cuGsoO1T2JRSZrU9lP7FeAPQnI6t4aYiELGHt8t1nXI=
+      LOGFLARE_API_KEY: Z1QGhd6u89xPVcEjWv0nrXkgY2f4szDo
+      LOGFLARE_URL: http://analytics:4000
+      NEXT_PUBLIC_ENABLE_LOGS: "true"
+      NEXT_ANALYTICS_BACKEND_PROVIDER: postgres
+    depends_on:
+      analytics:
+        condition: service_healthy
+    networks:
+      - yoltash-network
+
+  kong:
     image: kong:2.8.1
+    container_name: yoltash-kong-1
     restart: unless-stopped
     entrypoint: bash -c 'eval "echo \"$$(cat ~/temp.yml)\"" > ~/kong.yml && /docker-entrypoint.sh kong docker-start'
     expose:
@@ -125,229 +90,57 @@ services:
       KONG_PLUGINS: request-transformer,cors,key-auth,acl,basic-auth
       KONG_NGINX_PROXY_PROXY_BUFFER_SIZE: 160k
       KONG_NGINX_PROXY_PROXY_BUFFERS: 64 160k
-      SUPABASE_ANON_KEY: ${ANON_KEY}
-      SUPABASE_SERVICE_KEY: ${SERVICE_ROLE_KEY}
-      DASHBOARD_USERNAME: ${DASHBOARD_USERNAME}
-      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD}
+      SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InlvbHRhc2giLCJpYXQiOjE3NTAwMDAwMDAsImV4cCI6MTkwMDAwMDAwMH0.qcP7Ij_RChNfoKz2uD8E3PfqvcmUq9sT8x7Esv8lzGM
+      SUPABASE_SERVICE_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIiwiaXNzIjoieW9sdGFzaCIsImlhdCI6MTc1MDAwMDAwMCwiZXhwIjoxOTAwMDAwMDAwfQ.DK2dqushvB-hRP5ErGe9wEtUPNNQnB4OLCJ9Jd9G4a0
+      DASHBOARD_USERNAME: yoltash
+      DASHBOARD_PASSWORD: ftP6bn8GcQpB5L4aUGRJwz3pXoVqWqB7
     volumes:
-      - ./volumes/api/kong.yml:/home/kong/temp.yml:ro
+      - ../files/volumes/api/kong.yml:/home/kong/temp.yml:ro
     depends_on:
-      analytics-yoltash:
+      analytics:
         condition: service_healthy
     networks:
       - yoltash-network
 
-  auth-yoltash:
-    container_name: auth-yoltash
-    image: supabase/gotrue:v2.158.1
-    restart: unless-stopped
-    depends_on:
-      db-yoltash:
-        condition: service_healthy
-      analytics-yoltash:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9999/health"]
-      timeout: 5s
-      interval: 5s
-      retries: 3
-    environment:
-      GOTRUE_API_HOST: 0.0.0.0
-      GOTRUE_API_PORT: 9999
-      API_EXTERNAL_URL: http://${SUPABASE_HOST}
-      GOTRUE_DB_DRIVER: postgres
-      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${POSTGRES_PASSWORD}@db-yoltash:${POSTGRES_PORT}/${POSTGRES_DB}
-      GOTRUE_SITE_URL: http://${SUPABASE_HOST}
-      GOTRUE_URI_ALLOW_LIST: ${ADDITIONAL_REDIRECT_URLS}
-      GOTRUE_DISABLE_SIGNUP: ${DISABLE_SIGNUP}
-      GOTRUE_JWT_ADMIN_ROLES: service_role
-      GOTRUE_JWT_AUD: authenticated
-      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
-      GOTRUE_JWT_EXP: ${JWT_EXPIRY}
-      GOTRUE_JWT_SECRET: ${JWT_SECRET}
-      GOTRUE_EXTERNAL_EMAIL_ENABLED: ${ENABLE_EMAIL_SIGNUP}
-      GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED: ${ENABLE_ANONYMOUS_USERS}
-      GOTRUE_MAILER_AUTOCONFIRM: ${ENABLE_EMAIL_AUTOCONFIRM}
-      GOTRUE_SMTP_ADMIN_EMAIL: ${SMTP_ADMIN_EMAIL}
-      GOTRUE_SMTP_HOST: ${SMTP_HOSTNAME}
-      GOTRUE_SMTP_PORT: ${SMTP_PORT}
-      GOTRUE_SMTP_USER: ${SMTP_USER}
-      GOTRUE_SMTP_PASS: ${SMTP_PASS}
-      GOTRUE_SMTP_SENDER_NAME: ${SMTP_SENDER_NAME}
-      GOTRUE_MAILER_URLPATHS_INVITE: ${MAILER_URLPATHS_INVITE}
-      GOTRUE_MAILER_URLPATHS_CONFIRMATION: ${MAILER_URLPATHS_CONFIRMATION}
-      GOTRUE_MAILER_URLPATHS_RECOVERY: ${MAILER_URLPATHS_RECOVERY}
-      GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE: ${MAILER_URLPATHS_EMAIL_CHANGE}
-      GOTRUE_EXTERNAL_PHONE_ENABLED: ${ENABLE_PHONE_SIGNUP}
-      GOTRUE_SMS_AUTOCONFIRM: ${ENABLE_PHONE_AUTOCONFIRM}
-    networks:
-      - yoltash-network
-
-  rest-yoltash:
-    container_name: rest-yoltash
-    image: postgrest/postgrest:v12.2.0
-    depends_on:
-      db-yoltash:
-        condition: service_healthy
-      analytics-yoltash:
-        condition: service_healthy
-    restart: unless-stopped
-    environment:
-      PGRST_DB_URI: postgres://authenticator:${POSTGRES_PASSWORD}@db-yoltash:${POSTGRES_PORT}/${POSTGRES_DB}
-      PGRST_DB_SCHEMAS: ${PGRST_DB_SCHEMAS}
-      PGRST_DB_ANON_ROLE: anon
-      PGRST_JWT_SECRET: ${JWT_SECRET}
-      PGRST_DB_USE_LEGACY_GUCS: "false"
-      PGRST_APP_SETTINGS_JWT_SECRET: ${JWT_SECRET}
-      PGRST_APP_SETTINGS_JWT_EXP: ${JWT_EXPIRY}
-    command: "postgrest"
-    networks:
-      - yoltash-network
-
-  realtime-yoltash:
-    container_name: realtime-yoltash
-    image: supabase/realtime:v2.30.23
-    depends_on:
-      db-yoltash:
-        condition: service_healthy
-      analytics-yoltash:
-        condition: service_healthy
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "curl",
-          "-sSfL",
-          "--head",
-          "-o",
-          "/dev/null",
-          "-H",
-          "Authorization: Bearer ${ANON_KEY}",
-          "http://localhost:4000/api/tenants/realtime-dev/health",
-        ]
-      timeout: 5s
-      interval: 5s
-      retries: 3
-    restart: unless-stopped
-    environment:
-      PORT: 4000
-      DB_HOST: db-yoltash
-      DB_PORT: ${POSTGRES_PORT}
-      DB_USER: supabase_admin
-      DB_PASSWORD: ${POSTGRES_PASSWORD}
-      DB_NAME: ${POSTGRES_DB}
-      DB_AFTER_CONNECT_QUERY: "SET search_path TO _realtime"
-      DB_ENC_KEY: supabaserealtime
-      API_JWT_SECRET: ${JWT_SECRET}
-      SECRET_KEY_BASE: UpNVntn3cDxHJpq99YMc1T1AQgQpc8kfYTuRgBiYa15BLrx8etQoXz3gZv1/u2oq
-      ERL_AFLAGS: -proto_dist inet_tcp
-      DNS_NODES: "''"
-      RLIMIT_NOFILE: "10000"
-      APP_NAME: realtime
-      SEED_SELF_HOST: true
-    networks:
-      - yoltash-network
-
-  storage-yoltash:
-    container_name: storage-yoltash
-    image: supabase/storage-api:v1.0.6
-    depends_on:
-      db-yoltash:
-        condition: service_healthy
-      rest-yoltash:
-        condition: service_started
-      imgproxy-yoltash:
-        condition: service_started
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5000/status"]
-      timeout: 5s
-      interval: 5s
-      retries: 3
-    restart: unless-stopped
-    environment:
-      ANON_KEY: ${ANON_KEY}
-      SERVICE_KEY: ${SERVICE_ROLE_KEY}
-      POSTGREST_URL: http://rest-yoltash:3000
-      PGRST_JWT_SECRET: ${JWT_SECRET}
-      DATABASE_URL: postgres://supabase_storage_admin:${POSTGRES_PASSWORD}@db-yoltash:${POSTGRES_PORT}/${POSTGRES_DB}
-      FILE_SIZE_LIMIT: 52428800
-      STORAGE_BACKEND: file
-      FILE_STORAGE_BACKEND_PATH: /var/lib/storage
-      TENANT_ID: stub
-      REGION: stub
-      GLOBAL_S3_BUCKET: stub
-      ENABLE_IMAGE_TRANSFORMATION: "true"
-      IMGPROXY_URL: http://imgproxy-yoltash:5001
-    volumes:
-      - ./volumes/storage:/var/lib/storage:z
-    networks:
-      - yoltash-network
-
-  imgproxy-yoltash:
-    container_name: imgproxy-yoltash
-    image: darthsim/imgproxy:v3.8.0
-    healthcheck:
-      test: ["CMD", "imgproxy", "health"]
-      timeout: 5s
-      interval: 5s
-      retries: 3
-    environment:
-      IMGPROXY_BIND: ":5001"
-      IMGPROXY_LOCAL_FILESYSTEM_ROOT: /
-      IMGPROXY_USE_ETAG: "true"
-      IMGPROXY_ENABLE_WEBP_DETECTION: ${IMGPROXY_ENABLE_WEBP_DETECTION}
-    volumes:
-      - ./volumes/storage:/var/lib/storage:z
-    networks:
-      - yoltash-network
-
-  meta-yoltash:
-    container_name: meta-yoltash
+  meta:
     image: supabase/postgres-meta:v0.83.2
-    depends_on:
-      db-yoltash:
-        condition: service_healthy
-      analytics-yoltash:
-        condition: service_healthy
-    restart: unless-stopped
+    container_name: yoltash-meta-1
     environment:
       PG_META_PORT: 8080
-      PG_META_DB_HOST: db-yoltash
-      PG_META_DB_PORT: ${POSTGRES_PORT}
-      PG_META_DB_NAME: ${POSTGRES_DB}
+      PG_META_DB_HOST: db
+      PG_META_DB_PORT: 5432
+      PG_META_DB_NAME: postgres
       PG_META_DB_USER: supabase_admin
-      PG_META_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      PG_META_DB_PASSWORD: sfJm7QpwQXE5dKu83vGTGk6W42vLhBAy
+    depends_on:
+      db:
+        condition: service_healthy
+      analytics:
+        condition: service_healthy
     networks:
       - yoltash-network
 
-  functions-yoltash:
-    container_name: functions-yoltash
-    image: supabase/edge-runtime:v1.56.0
-    restart: unless-stopped
-    depends_on:
-      analytics-yoltash:
-        condition: service_healthy
-    environment:
-      JWT_SECRET: ${JWT_SECRET}
-      SUPABASE_URL: http://kong-yoltash:8000
-      SUPABASE_ANON_KEY: ${ANON_KEY}
-      SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
-      SUPABASE_DB_URL: postgresql://postgres:${POSTGRES_PASSWORD}@db-yoltash:${POSTGRES_PORT}/${POSTGRES_DB}
-      VERIFY_JWT: "${FUNCTIONS_VERIFY_JWT}"
+  vector:
+    image: timberio/vector:0.28.1-alpine
+    container_name: yoltash-vector-1
     volumes:
-      - ./volumes/functions:/home/deno/functions:Z
-    command:
-      - start
-      - --main-service
-      - /home/deno/functions/main
+      - ../files/volumes/logs/vector.yml:/etc/vector/vector.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      LOGFLARE_API_KEY: Z1QGhd6u89xPVcEjWv0nrXkgY2f4szDo
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://vector:9001/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+    command: ["--config", "etc/vector/vector.yml"]
     networks:
       - yoltash-network
 
 volumes:
-  db-data-yoltash:
-  storage-yoltash:
-  logs-yoltash:
+  db-data:
 
 networks:
   yoltash-network:
     driver: bridge
+
