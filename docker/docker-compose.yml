@@ -27,6 +27,23 @@ services:
     networks:
       - yoltash-network
 
+  vector-yoltash:
+    container_name: vector-yoltash
+    image: timberio/vector:0.28.1-alpine
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://vector-yoltash:9001/health"]
+      timeout: 5s
+      interval: 5s
+      retries: 3
+    volumes:
+      - ./volumes/logs/vector.yml:/etc/vector/vector.yml:ro
+      - ${DOCKER_SOCKET_LOCATION}:/var/run/docker.sock:ro
+    environment:
+      LOGFLARE_API_KEY: ${LOGFLARE_API_KEY}
+    command: ["--config", "etc/vector/vector.yml"]
+    networks:
+      - yoltash-network
+
   analytics-yoltash:
     container_name: analytics-yoltash
     image: supabase/logflare:1.4.0
@@ -130,6 +147,11 @@ services:
         condition: service_healthy
       analytics-yoltash:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9999/health"]
+      timeout: 5s
+      interval: 5s
+      retries: 3
     environment:
       GOTRUE_API_HOST: 0.0.0.0
       GOTRUE_API_PORT: 9999
@@ -162,8 +184,170 @@ services:
     networks:
       - yoltash-network
 
-  # ... Добавь сюда все остальные сервисы из твоей старой версии (rest, realtime, storage, imgproxy, meta, functions, vector)
-  # просто скопируй их и поменяй везде имена на -yoltash и сети на yoltash-network
+  rest-yoltash:
+    container_name: rest-yoltash
+    image: postgrest/postgrest:v12.2.0
+    depends_on:
+      db-yoltash:
+        condition: service_healthy
+      analytics-yoltash:
+        condition: service_healthy
+    restart: unless-stopped
+    environment:
+      PGRST_DB_URI: postgres://authenticator:${POSTGRES_PASSWORD}@db-yoltash:${POSTGRES_PORT}/${POSTGRES_DB}
+      PGRST_DB_SCHEMAS: ${PGRST_DB_SCHEMAS}
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+      PGRST_DB_USE_LEGACY_GUCS: "false"
+      PGRST_APP_SETTINGS_JWT_SECRET: ${JWT_SECRET}
+      PGRST_APP_SETTINGS_JWT_EXP: ${JWT_EXPIRY}
+    command: "postgrest"
+    networks:
+      - yoltash-network
+
+  realtime-yoltash:
+    container_name: realtime-yoltash
+    image: supabase/realtime:v2.30.23
+    depends_on:
+      db-yoltash:
+        condition: service_healthy
+      analytics-yoltash:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "curl",
+          "-sSfL",
+          "--head",
+          "-o",
+          "/dev/null",
+          "-H",
+          "Authorization: Bearer ${ANON_KEY}",
+          "http://localhost:4000/api/tenants/realtime-dev/health",
+        ]
+      timeout: 5s
+      interval: 5s
+      retries: 3
+    restart: unless-stopped
+    environment:
+      PORT: 4000
+      DB_HOST: db-yoltash
+      DB_PORT: ${POSTGRES_PORT}
+      DB_USER: supabase_admin
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_NAME: ${POSTGRES_DB}
+      DB_AFTER_CONNECT_QUERY: "SET search_path TO _realtime"
+      DB_ENC_KEY: supabaserealtime
+      API_JWT_SECRET: ${JWT_SECRET}
+      SECRET_KEY_BASE: UpNVntn3cDxHJpq99YMc1T1AQgQpc8kfYTuRgBiYa15BLrx8etQoXz3gZv1/u2oq
+      ERL_AFLAGS: -proto_dist inet_tcp
+      DNS_NODES: "''"
+      RLIMIT_NOFILE: "10000"
+      APP_NAME: realtime
+      SEED_SELF_HOST: true
+    networks:
+      - yoltash-network
+
+  storage-yoltash:
+    container_name: storage-yoltash
+    image: supabase/storage-api:v1.0.6
+    depends_on:
+      db-yoltash:
+        condition: service_healthy
+      rest-yoltash:
+        condition: service_started
+      imgproxy-yoltash:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5000/status"]
+      timeout: 5s
+      interval: 5s
+      retries: 3
+    restart: unless-stopped
+    environment:
+      ANON_KEY: ${ANON_KEY}
+      SERVICE_KEY: ${SERVICE_ROLE_KEY}
+      POSTGREST_URL: http://rest-yoltash:3000
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+      DATABASE_URL: postgres://supabase_storage_admin:${POSTGRES_PASSWORD}@db-yoltash:${POSTGRES_PORT}/${POSTGRES_DB}
+      FILE_SIZE_LIMIT: 52428800
+      STORAGE_BACKEND: file
+      FILE_STORAGE_BACKEND_PATH: /var/lib/storage
+      TENANT_ID: stub
+      REGION: stub
+      GLOBAL_S3_BUCKET: stub
+      ENABLE_IMAGE_TRANSFORMATION: "true"
+      IMGPROXY_URL: http://imgproxy-yoltash:5001
+    volumes:
+      - ./volumes/storage:/var/lib/storage:z
+    networks:
+      - yoltash-network
+
+  imgproxy-yoltash:
+    container_name: imgproxy-yoltash
+    image: darthsim/imgproxy:v3.8.0
+    healthcheck:
+      test: ["CMD", "imgproxy", "health"]
+      timeout: 5s
+      interval: 5s
+      retries: 3
+    environment:
+      IMGPROXY_BIND: ":5001"
+      IMGPROXY_LOCAL_FILESYSTEM_ROOT: /
+      IMGPROXY_USE_ETAG: "true"
+      IMGPROXY_ENABLE_WEBP_DETECTION: ${IMGPROXY_ENABLE_WEBP_DETECTION}
+    volumes:
+      - ./volumes/storage:/var/lib/storage:z
+    networks:
+      - yoltash-network
+
+  meta-yoltash:
+    container_name: meta-yoltash
+    image: supabase/postgres-meta:v0.83.2
+    depends_on:
+      db-yoltash:
+        condition: service_healthy
+      analytics-yoltash:
+        condition: service_healthy
+    restart: unless-stopped
+    environment:
+      PG_META_PORT: 8080
+      PG_META_DB_HOST: db-yoltash
+      PG_META_DB_PORT: ${POSTGRES_PORT}
+      PG_META_DB_NAME: ${POSTGRES_DB}
+      PG_META_DB_USER: supabase_admin
+      PG_META_DB_PASSWORD: ${POSTGRES_PASSWORD}
+    networks:
+      - yoltash-network
+
+  functions-yoltash:
+    container_name: functions-yoltash
+    image: supabase/edge-runtime:v1.56.0
+    restart: unless-stopped
+    depends_on:
+      analytics-yoltash:
+        condition: service_healthy
+    environment:
+      JWT_SECRET: ${JWT_SECRET}
+      SUPABASE_URL: http://kong-yoltash:8000
+      SUPABASE_ANON_KEY: ${ANON_KEY}
+      SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
+      SUPABASE_DB_URL: postgresql://postgres:${POSTGRES_PASSWORD}@db-yoltash:${POSTGRES_PORT}/${POSTGRES_DB}
+      VERIFY_JWT: "${FUNCTIONS_VERIFY_JWT}"
+    volumes:
+      - ./volumes/functions:/home/deno/functions:Z
+    command:
+      - start
+      - --main-service
+      - /home/deno/functions/main
+    networks:
+      - yoltash-network
+
+volumes:
+  db-data-yoltash:
+  storage-yoltash:
+  logs-yoltash:
 
 networks:
   yoltash-network:
